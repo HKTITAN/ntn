@@ -23,22 +23,71 @@ program
   });
 
 program
+  .command('search')
+  .description('Search Notion')
+  .allowUnknownOption()
+  .action((options, cmd) => {
+    apiCmd('v1/search', { method: 'POST' }, cmd.args);
+  });
+
+program
+  .command('datasources')
+  .description('Manage datasources')
+  .argument('<action>', 'query/resolve')
+  .allowUnknownOption()
+  .action((action, options, cmd) => {
+    apiCmd(`v1/data_sources/${action}`, { method: 'POST' }, cmd.args.slice(1));
+  });
+
+program
   .command('pages')
   .description('Manage pages')
   .argument('<action>', 'get/create/update/trash')
+  .argument('[id]', 'Page ID (for get/update/trash)')
   .allowUnknownOption()
-  .action((action, opts, cmd) => {
-    console.log(`Command 'pages ${action}' is stubbed. Use 'ntn api v1/pages' instead for full control.`);
+  .action((action, id, opts, cmd) => {
+    const rawArgs = cmd.args.slice(id ? 2 : 1);
+    if (action === 'get') apiCmd(`v1/pages/${id}`, { method: 'GET' }, rawArgs);
+    else if (action === 'create') apiCmd('v1/pages', { method: 'POST' }, rawArgs);
+    else if (action === 'update') apiCmd(`v1/pages/${id}`, { method: 'PATCH' }, rawArgs);
+    else if (action === 'trash') apiCmd(`v1/pages/${id}`, { method: 'PATCH' }, ['archived:=true', ...rawArgs]);
   });
 
 program
   .command('files')
   .description('Upload and manage files')
   .argument('<action>', 'create/get/list')
+  .argument('[id]', 'File ID (for get)')
   .option('--external-url <url>', 'External URL to upload')
   .allowUnknownOption()
-  .action((action, options, cmd) => {
-    console.log(`Command 'files ${action}' is stubbed in this node port.`);
+  .action((action, id, options, cmd) => {
+    const rawArgs = cmd.args.slice(id && action === 'get' ? 2 : 1);
+    if (action === 'list') {
+      apiCmd('v1/file_uploads', { method: 'GET' }, rawArgs);
+    } else if (action === 'get') {
+      apiCmd(`v1/file_uploads/${id}`, { method: 'GET' }, rawArgs);
+    } else if (action === 'create') {
+      if (options.externalUrl) {
+        apiCmd('v1/file_uploads', { method: 'POST' }, ['externalUrl:=' + options.externalUrl, ...rawArgs]);
+      } else {
+        const fs = require('node:fs');
+        try {
+          const buf = fs.readFileSync(0); // read from stdin
+          if (buf.length > 0) {
+            const { request } = require('./api/public.js');
+            request('POST', 'v1/file_uploads', buf).then(res => {
+              if (res) console.log(JSON.stringify(res, null, 2));
+            });
+          } else {
+            console.error("Error: Please pipe a file to this command or use --external-url.");
+            process.exitCode = 1;
+          }
+        } catch(e) {
+          console.error("Error reading from stdin.", e.message);
+          process.exitCode = 1;
+        }
+      }
+    }
   });
 
 // Setup workers passthrough
