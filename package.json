@@ -8,8 +8,7 @@
 	},
 	"files": [
 		"bin",
-		"dist",
-		"install.cjs",
+		"src",
 		"LICENSE.md",
 		"README.md"
 	],
