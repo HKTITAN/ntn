@@ -9,7 +9,6 @@
 	"files": [
 		"bin",
 		"src",
-		"scripts",
 		"LICENSE.md",
 		"README.md"
 	],
@@ -19,8 +18,6 @@
 	"engines": {
 		"node": ">=18"
 	},
-	"scripts": {
-		"postinstall": "node scripts/postinstall.js || true"
-	},
+	"scripts": {},
 	"dependencies": {}
 }

@@ -9,8 +9,15 @@ async function runDoctor(opts) {
   const checks = [];
   const env = C.getEnv(opts.env);
 
-  checks.push({ name: 'Node version', ok: process.versions.node >= '18', value: process.versions.node });
+  const [maj] = process.versions.node.split('.').map(Number);
+  checks.push({ name: 'Node version', ok: maj >= 18, value: `${process.versions.node} (need >= 18)` });
   checks.push({ name: 'Platform', ok: true, value: `${process.platform}-${process.arch}` });
+  const depCount = Object.keys(require('../../package.json').dependencies || {}).length;
+  checks.push({
+    name: 'npm dependencies',
+    ok: true,
+    value: depCount === 0 ? '0 — using built-in Node APIs, already available' : `${depCount} installed`,
+  });
   checks.push({ name: 'NOTION_HOME', ok: !!C.notionHome(), value: C.notionHome() });
   checks.push({ name: 'Auth file', ok: fs.existsSync(C.authFile()), value: C.authFile() });
   checks.push({ name: 'NOTION_API_TOKEN env', ok: !!process.env.NOTION_API_TOKEN, value: process.env.NOTION_API_TOKEN ? '(set)' : '(unset)' });
