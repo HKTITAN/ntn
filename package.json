@@ -1,7 +1,7 @@
 {
 	"name": "ntn",
 	"version": "0.13.2",
-	"description": "Notion CLI",
+	"description": "Notion CLI — cross-platform Node.js port",
 	"license": "MIT",
 	"bin": {
 		"ntn": "bin/ntn"
@@ -15,9 +15,9 @@
 	"publishConfig": {
 		"access": "public"
 	},
+	"engines": {
+		"node": ">=18"
+	},
 	"scripts": {},
-	"dependencies": {
-		"commander": "^11.1.0",
-		"node-fetch": "^3.3.2"
-	}
+	"dependencies": {}
 }
