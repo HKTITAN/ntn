@@ -58,6 +58,25 @@ function camel(flag) {
   return flag.replace(/^--?/, '').replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 }
 
+const WELCOME = `
+Notion CLI (Beta)
+
+ntn v${VERSION} ready.
+
+Get started:
+
+  ntn login              Log in to your Notion workspace
+  ntn workers new        Create a new worker
+  ntn datasources query  Query a data source
+  ntn pages create       Create a page from Markdown
+  ntn api                Call the Notion API directly
+  ntn --help             See all available commands
+
+Add the Notion skill for your agents:
+
+  npx skills add makenotion/skills
+`;
+
 const HELP = `ntn — Notion CLI (Node port) v${VERSION}
 
 USAGE:
@@ -114,8 +133,13 @@ ENV VARS:
 `;
 
 async function main(argv) {
-  // Any --help/-h or --version/-V anywhere short-circuits, mirroring clap.
-  if (!argv.length || argv.includes('--help') || argv.includes('-h') || argv[0] === 'help') {
+  // No args -> friendly welcome banner (matches upstream post-install screen).
+  if (!argv.length) {
+    process.stdout.write(WELCOME);
+    return;
+  }
+  // --help/-h anywhere -> full help reference.
+  if (argv.includes('--help') || argv.includes('-h') || argv[0] === 'help') {
     process.stdout.write(HELP);
     return;
   }
