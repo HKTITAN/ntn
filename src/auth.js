@@ -22,11 +22,19 @@ function writeAuth(data) {
   C.writeJson(C.authFile(), data);
 }
 
-function getApiToken() {
+function getApiToken(envName) {
   if (process.env.NOTION_API_TOKEN) return process.env.NOTION_API_TOKEN;
   const a = readAuth();
-  if (a.token) return a.token;
-  // No public-API integration token configured.
+  if (a.token) return a.token; // legacy single-token shape
+  // Fall back to the saved workspace token from `ntn login` for the current env.
+  if (envName) {
+    const env = a.environments && a.environments[envName];
+    if (env) {
+      const spaceId = env.defaultSpaceId || env.defaultWorkspaceId;
+      const t = spaceId && env.tokens && env.tokens[spaceId];
+      if (t && (t.token || t.accessToken)) return t.token || t.accessToken;
+    }
+  }
   return null;
 }
 

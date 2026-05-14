@@ -21,12 +21,12 @@ function buildUrl(base, endpoint, query) {
 async function publicRequest({ method = 'GET', endpoint, body, headers = {}, query, envName, raw = false }) {
   envName = envName || C.getEnv();
   const base = C.apiBaseUrl(envName);
-  const token = auth.getApiToken();
+  const token = auth.getApiToken(envName);
   if (!token) {
     throw new Error(
       "Not authenticated for the Notion public API.\n" +
       "Set NOTION_API_TOKEN (an integration token from https://www.notion.so/profile/integrations),\n" +
-      "or save one via: ntn config set-token <secret_...>"
+      "or run 'ntn login' to reuse a saved workspace token."
     );
   }
   const url = buildUrl(base, endpoint, query);

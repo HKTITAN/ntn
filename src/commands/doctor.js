@@ -21,7 +21,7 @@ async function runDoctor(opts) {
   try {
     const res = await fetch(`${C.apiBaseUrl(env)}/v1/users/me`, {
       headers: {
-        'Authorization': `Bearer ${auth.getApiToken() || ''}`,
+        'Authorization': `Bearer ${auth.getApiToken(env) || ''}`,
         'Notion-Version': C.NOTION_VERSION,
       },
     });
