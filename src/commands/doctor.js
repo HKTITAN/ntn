@@ -15,7 +15,7 @@ async function runDoctor(opts) {
   checks.push({ name: 'Auth file', ok: fs.existsSync(C.authFile()), value: C.authFile() });
   checks.push({ name: 'NOTION_API_TOKEN env', ok: !!process.env.NOTION_API_TOKEN, value: process.env.NOTION_API_TOKEN ? '(set)' : '(unset)' });
   const t = auth.getWorkspaceToken(env);
-  checks.push({ name: `Workspace token (${env})`, ok: !!t, value: t ? t.workspaceId : '(none)' });
+  checks.push({ name: `Workspace token (${env})`, ok: !!t, value: t ? `${t.spaceName || ''} (${t.spaceId})`.trim() : '(none)' });
 
   // Public API reachability
   try {

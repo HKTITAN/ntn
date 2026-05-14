@@ -1,16 +1,15 @@
 'use strict';
 
-const readline = require('node:readline');
 const C = require('../config');
 const auth = require('../auth');
-const { workersUnauthRequest, workersRequest } = require('../http');
+const { workersUnauthRequest } = require('../http');
 const { openBrowser } = require('../browser');
 
 const POLL_INTERVAL_MS = 2000;
-const POLL_TIMEOUT_MS = 5 * 60 * 1000;
+const FALLBACK_TIMEOUT_MS = 10 * 60 * 1000;
 
 async function loginInit(envName) {
-  const res = await workersUnauthRequest({
+  return await workersUnauthRequest({
     action: 'CliLoginInit',
     envName,
     body: {
@@ -19,8 +18,6 @@ async function loginInit(envName) {
       hostname: require('node:os').hostname(),
     },
   });
-  // Expected fields: sessionId, browserUrl OR authorizationUrl, verificationCode
-  return res;
 }
 
 async function loginRedeem(envName, sessionId) {
@@ -31,11 +28,12 @@ async function loginRedeem(envName, sessionId) {
   });
 }
 
-function savePending(envName, sessionId, verificationCode) {
+function savePending(envName, sessionId, verificationCode, expiresAt) {
   C.writeJson(C.pendingLoginFile(), {
     sessionId,
     verificationCode,
     environment: envName,
+    expiresAt,
     startedAt: new Date().toISOString(),
   });
 }
@@ -49,28 +47,40 @@ function clearPending() {
   try { fs.unlinkSync(C.pendingLoginFile()); } catch (_) {}
 }
 
-async function pollUntilConfirmed(envName, sessionId, verificationCode) {
+async function pollUntilConfirmed(envName, sessionId, verificationCode, expiresAtStr) {
   process.stderr.write(`Waiting for confirmation... (verification code: ${verificationCode})\n`);
-  const deadline = Date.now() + POLL_TIMEOUT_MS;
-  while (Date.now() < deadline) {
+  const expiresAt = expiresAtStr ? new Date(expiresAtStr).getTime() : (Date.now() + FALLBACK_TIMEOUT_MS);
+  while (Date.now() < expiresAt) {
     let res;
     try {
       res = await loginRedeem(envName, sessionId);
     } catch (e) {
-      process.stderr.write(`Login redeem failed: ${e.message}\n`);
-      throw e;
+      // Transient errors: log and continue polling unless verbose
+      if (process.env.NTN_VERBOSE) process.stderr.write(`(redeem error: ${e.message})\n`);
+      await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+      continue;
     }
-    // Internally-tagged enum: { status: "Pending" | "Confirmed" | "Expired", ... }
-    const status = res.status || res.kind || res.type;
-    if (status === 'Confirmed' || res.accessToken) {
-      return res;
-    }
-    if (status === 'Expired') {
+    if (process.env.NTN_VERBOSE) process.stderr.write(`(redeem: ${JSON.stringify(res)})\n`);
+    const status = String(res && res.status || '').toLowerCase();
+    if (status === 'confirmed') return res;
+    if (status === 'expired') {
       throw new Error("Login session expired. Run 'ntn login' to start a new one.");
     }
+    // status === 'pending' or unknown -> wait
     await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
   }
   throw new Error('Login was not completed in time.');
+}
+
+function saveConfirmed(envName, confirmed) {
+  const token = confirmed.token;
+  const spaceId = confirmed.spaceId;
+  const spaceName = confirmed.spaceName || '';
+  if (!token || !spaceId) {
+    throw new Error(`Login redeem returned an unexpected payload: ${JSON.stringify(confirmed)}`);
+  }
+  auth.saveWorkspaceToken(envName, spaceId, token, null, spaceName);
+  return { spaceId, spaceName };
 }
 
 async function runLogin(opts) {
@@ -86,11 +96,12 @@ async function runLogin(opts) {
   const sessionId = init.sessionId;
   const verificationCode = init.verificationCode || '';
   const browserUrl = init.browserUrl || init.authorizationUrl;
+  const expiresAt = init.expiresAt || null;
   if (!sessionId || !browserUrl) {
     process.stderr.write(`Login init response missing required fields:\n${JSON.stringify(init, null, 2)}\n`);
     process.exit(1);
   }
-  savePending(envName, sessionId, verificationCode);
+  savePending(envName, sessionId, verificationCode, expiresAt);
 
   process.stderr.write('Opening browser to log in. Confirm that this verification code matches\n');
   process.stderr.write('what you see in the browser:\n\n');
@@ -105,17 +116,10 @@ async function runLogin(opts) {
   process.stderr.write('After completing the flow in your browser, return to the CLI.\n');
 
   try {
-    const confirmed = await pollUntilConfirmed(envName, sessionId, verificationCode);
-    const workspaceId = confirmed.workspaceId || confirmed.workspace_id;
-    const accessToken = confirmed.accessToken || confirmed.access_token;
-    const expiresAt = confirmed.expiresAt || confirmed.expires_at || null;
-    if (!workspaceId || !accessToken) {
-      process.stderr.write(`Login redeem returned an unexpected payload:\n${JSON.stringify(confirmed, null, 2)}\n`);
-      process.exit(1);
-    }
-    auth.saveWorkspaceToken(envName, workspaceId, accessToken, expiresAt);
+    const confirmed = await pollUntilConfirmed(envName, sessionId, verificationCode, expiresAt);
+    const { spaceId, spaceName } = saveConfirmed(envName, confirmed);
     clearPending();
-    process.stderr.write(`Authenticated! Workspace ${workspaceId} saved for env=${envName}.\n`);
+    process.stderr.write(`Authenticated! Workspace ${spaceName ? `'${spaceName}' (${spaceId})` : spaceId} saved for env=${envName}.\n`);
   } catch (e) {
     process.stderr.write(`${e.message}\n`);
     process.stderr.write("Run 'ntn login poll' to try again, or 'ntn login' to start a new session.\n");
@@ -131,13 +135,10 @@ async function runLoginPoll(opts) {
   }
   const envName = C.getEnv(opts.env || pending.environment);
   try {
-    const confirmed = await pollUntilConfirmed(envName, pending.sessionId, pending.verificationCode);
-    const workspaceId = confirmed.workspaceId || confirmed.workspace_id;
-    const accessToken = confirmed.accessToken || confirmed.access_token;
-    const expiresAt = confirmed.expiresAt || confirmed.expires_at || null;
-    auth.saveWorkspaceToken(envName, workspaceId, accessToken, expiresAt);
+    const confirmed = await pollUntilConfirmed(envName, pending.sessionId, pending.verificationCode, pending.expiresAt);
+    const { spaceId, spaceName } = saveConfirmed(envName, confirmed);
     clearPending();
-    process.stderr.write(`Authenticated! Workspace ${workspaceId} saved for env=${envName}.\n`);
+    process.stderr.write(`Authenticated! Workspace ${spaceName ? `'${spaceName}' (${spaceId})` : spaceId} saved for env=${envName}.\n`);
   } catch (e) {
     process.stderr.write(`${e.message}\n`);
     process.exit(1);

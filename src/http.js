@@ -67,11 +67,15 @@ async function workersRequest({ action, body = {}, envName, workspaceId, headers
     throw new Error("Not authenticated. Run 'ntn login' to start a workspace session.");
   }
   const url = `${base.replace(/\/$/, '')}/api/v3/workers${action}`;
+  // Notion's private /api/v3 endpoints traditionally authenticate via the
+  // token_v2 cookie. Send both forms (Cookie + Bearer) so we work against
+  // either flavor of the workers backend.
   const h = {
-    'Authorization': `Bearer ${t.accessToken}`,
+    'Cookie': `token_v2=${t.token}`,
+    'Authorization': `Bearer ${t.token}`,
     'Content-Type': 'application/json',
     'User-Agent': `ntn-node/${require('../package.json').version}`,
-    'x-notion-workspace-id': t.workspaceId,
+    'x-notion-space-id': t.spaceId,
     ...headers,
   };
   if (process.env.NTN_VERBOSE) {

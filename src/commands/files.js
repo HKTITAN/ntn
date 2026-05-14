@@ -27,12 +27,13 @@ function guessContentType(name) {
   }[ext] || 'application/octet-stream';
 }
 
-async function uploadSinglePart(uploadUrl, buf, contentType) {
+async function uploadSinglePart(uploadUrl, buf, contentType, filename) {
   // multipart/form-data with file field
   const boundary = '----ntn' + Date.now().toString(36) + Math.random().toString(36).slice(2);
+  const safeName = String(filename || 'upload').replace(/["\r\n]/g, '_');
   const head = Buffer.from(
     `--${boundary}\r\n` +
-    `Content-Disposition: form-data; name="file"; filename="upload"\r\n` +
+    `Content-Disposition: form-data; name="file"; filename="${safeName}"\r\n` +
     `Content-Type: ${contentType}\r\n\r\n`
   );
   const tail = Buffer.from(`\r\n--${boundary}--\r\n`);
@@ -101,17 +102,20 @@ async function runFiles(action, id, opts) {
     try {
       const initBody = { mode: 'single_part', filename, content_type: contentType };
       const init = await publicRequest({ method: 'POST', endpoint: 'v1/file_uploads', body: initBody, envName: env });
-      if (!init.upload_url) {
+      let initObj = init;
+      if (!initObj.upload_url) {
         // Server-side may have a different mode key; fall back to no-mode init
-        const init2 = await publicRequest({ method: 'POST', endpoint: 'v1/file_uploads', body: { filename, content_type: contentType }, envName: env });
-        const sendUrl = init2.upload_url;
-        if (!sendUrl) die('File upload init did not return an upload_url.');
-        await uploadSinglePart(sendUrl, data, contentType);
-        printJson(init2);
-        return;
+        initObj = await publicRequest({ method: 'POST', endpoint: 'v1/file_uploads', body: { filename, content_type: contentType }, envName: env });
       }
-      await uploadSinglePart(init.upload_url, data, contentType);
-      printJson(init);
+      if (!initObj.upload_url) die('File upload init did not return an upload_url.');
+      await uploadSinglePart(initObj.upload_url, data, contentType, filename);
+      // Re-fetch the upload to confirm completion status
+      try {
+        const finalState = await publicRequest({ method: 'GET', endpoint: `v1/file_uploads/${initObj.id}`, envName: env });
+        printJson(finalState);
+      } catch (_) {
+        printJson(initObj);
+      }
     } catch (e) { die(e.message); }
     return;
   }

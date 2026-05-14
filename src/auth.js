@@ -30,34 +30,34 @@ function getApiToken() {
   return null;
 }
 
-function getWorkspaceToken(envName, workspaceId) {
+function getWorkspaceToken(envName, spaceId) {
   const a = readAuth();
   const env = a.environments && a.environments[envName];
   if (!env) return null;
-  if (!workspaceId) workspaceId = env.defaultWorkspaceId;
-  if (!workspaceId) return null;
-  const t = env.tokens && env.tokens[workspaceId];
+  if (!spaceId) spaceId = env.defaultSpaceId || env.defaultWorkspaceId;
+  if (!spaceId) return null;
+  const t = env.tokens && env.tokens[spaceId];
   if (!t) return null;
-  return { workspaceId, accessToken: t.accessToken, expiresAt: t.expiresAt };
+  return { spaceId, token: t.token || t.accessToken, spaceName: t.spaceName || '', expiresAt: t.expiresAt };
 }
 
-function saveWorkspaceToken(envName, workspaceId, accessToken, expiresAt) {
+function saveWorkspaceToken(envName, spaceId, token, expiresAt, spaceName) {
   const a = readAuth();
   if (!a.environments) a.environments = {};
   if (!a.environments[envName]) a.environments[envName] = { tokens: {} };
   if (!a.environments[envName].tokens) a.environments[envName].tokens = {};
-  a.environments[envName].tokens[workspaceId] = { accessToken, expiresAt };
-  if (!a.environments[envName].defaultWorkspaceId) {
-    a.environments[envName].defaultWorkspaceId = workspaceId;
+  a.environments[envName].tokens[spaceId] = { token, expiresAt: expiresAt || null, spaceName: spaceName || '' };
+  if (!a.environments[envName].defaultSpaceId) {
+    a.environments[envName].defaultSpaceId = spaceId;
   }
   writeAuth(a);
 }
 
-function setDefaultWorkspace(envName, workspaceId) {
+function setDefaultWorkspace(envName, spaceId) {
   const a = readAuth();
   if (!a.environments) a.environments = {};
   if (!a.environments[envName]) a.environments[envName] = { tokens: {} };
-  a.environments[envName].defaultWorkspaceId = workspaceId;
+  a.environments[envName].defaultSpaceId = spaceId;
   writeAuth(a);
 }
 
@@ -74,9 +74,10 @@ function listWorkspaces(envName) {
   const env = a.environments && a.environments[envName];
   if (!env || !env.tokens) return [];
   return Object.keys(env.tokens).map(id => ({
-    workspaceId: id,
+    spaceId: id,
+    spaceName: env.tokens[id].spaceName || '',
     expiresAt: env.tokens[id].expiresAt,
-    isDefault: env.defaultWorkspaceId === id,
+    isDefault: (env.defaultSpaceId || env.defaultWorkspaceId) === id,
   }));
 }
 
