@@ -114,11 +114,12 @@ ENV VARS:
 `;
 
 async function main(argv) {
-  if (!argv.length || argv[0] === '--help' || argv[0] === '-h' || argv[0] === 'help') {
+  // Any --help/-h or --version/-V anywhere short-circuits, mirroring clap.
+  if (!argv.length || argv.includes('--help') || argv.includes('-h') || argv[0] === 'help') {
     process.stdout.write(HELP);
     return;
   }
-  if (argv[0] === '--version' || argv[0] === '-V' || argv[0] === 'version') {
+  if (argv.includes('--version') || argv.includes('-V') || argv[0] === 'version') {
     process.stdout.write(VERSION + '\n');
     return;
   }

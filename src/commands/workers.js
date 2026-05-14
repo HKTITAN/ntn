@@ -203,29 +203,12 @@ async function runWorkers(sub, args, opts) {
     return;
   }
   if (sub === 'deploy') {
-    // High-level deploy: requires bundling the project. For the cross-platform port
-    // we issue a minimal CreateWorker / UpdateWorker call referencing the local
-    // package.json. Full Rust deploy includes git-aware packaging which is out of scope here.
-    const wc = readWorkersConfig() || {};
-    const pkg = C.readJson('package.json', null);
-    const name = opts.name || wc.name || (pkg && pkg.name);
-    if (!name) die('A worker name is required. Pass --name <name>.');
-    if (wc.workerId && opts.name) die('Cannot use --name when updating an existing worker. Remove --name to update.');
-    process.stderr.write('Packing source...\n');
-    const source = collectSource();
-    process.stderr.write('Uploading...\n');
-    if (wc.workerId) {
-      const res = await workersRequest({ action: 'UpdateWorker', body: { workerId: wc.workerId, source }, envName: env });
-      process.stderr.write('Worker updated.\n');
-      printJson(res);
-    } else {
-      const res = await workersRequest({ action: 'CreateWorker', body: { name, source }, envName: env });
-      const workerId = res.id || (res.worker && res.worker.id);
-      if (workerId) writeWorkersConfig({ workerId, environment: env, name });
-      process.stderr.write('Worker created.\n');
-      printJson(res);
-    }
-    return;
+    die(
+      "'ntn workers deploy' is not implemented in this port.\n" +
+      "Notion's deploy flow uses a multi-step bundle/upload/build pipeline that ships only\n" +
+      "with the upstream Rust binary. Use the official 'ntn' (macOS/Linux) for deployment,\n" +
+      "or use 'ntn workers new <name>' here to create a worker and deploy from another machine."
+    );
   }
   if (sub === 'exec') {
     // Best-effort: invoke a function on a worker.
@@ -244,28 +227,6 @@ async function runWorkers(sub, args, opts) {
     die('TUI mode is not available in the Node.js port. Use `ntn workers list` and related subcommands.');
   }
   die(`Unknown 'workers' subcommand '${sub}'. Use: list, get, new, deploy, delete, runs, env, capabilities, webhooks, sync, oauth, usage, exec.`);
-}
-
-function collectSource() {
-  // Encode current directory as a flat object of relative-path -> base64 contents.
-  const path = require('node:path');
-  const root = process.cwd();
-  const ignore = new Set(['.git', 'node_modules', 'dist', 'build']);
-  const out = {};
-  function walk(dir) {
-    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (ignore.has(ent.name)) continue;
-      const full = path.join(dir, ent.name);
-      if (ent.isDirectory()) walk(full);
-      else if (ent.isFile()) {
-        const buf = fs.readFileSync(full);
-        if (buf.length > 5 * 1024 * 1024) continue; // skip >5MB
-        out[path.relative(root, full).split(path.sep).join('/')] = buf.toString('base64');
-      }
-    }
-  }
-  walk(root);
-  return out;
 }
 
 module.exports = { runWorkers };

@@ -1,2 +1,14 @@
 #!/usr/bin/env node
+'use strict';
+
+// Fail fast on Node < 18 (we rely on built-in fetch and AbortController).
+const [maj] = process.versions.node.split('.').map(Number);
+if (maj < 18) {
+  process.stderr.write(
+    `ntn requires Node.js 18 or newer. You are on ${process.versions.node}.\n` +
+    `Install a recent Node (https://nodejs.org) and re-run.\n`
+  );
+  process.exit(1);
+}
+
 require('../src/cli.js').main(process.argv.slice(2));

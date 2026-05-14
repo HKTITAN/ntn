@@ -34,7 +34,6 @@ function editorPrompt() {
 }
 
 function parseParent(parentArg) {
-  // Accept: 'page:<id>', 'database:<id>', 'data-source:<id>', or raw UUID (defaults to page).
   if (!parentArg) return null;
   const m = parentArg.match(/^(page|database|data-source|data_source|workspace):(.+)$/);
   if (m) {
@@ -49,7 +48,6 @@ function parseParent(parentArg) {
 }
 
 function markdownToBlocks(md) {
-  // Minimal Markdown -> Notion blocks converter (paragraphs and headings).
   if (!md) return [];
   const lines = md.replace(/\r\n/g, '\n').split('\n');
   const blocks = [];
@@ -66,14 +64,25 @@ function markdownToBlocks(md) {
   };
   for (const line of lines) {
     const h = line.match(/^(#{1,3})\s+(.*)$/);
+    const bullet = line.match(/^\s*[-*]\s+(.*)$/);
+    const numbered = line.match(/^\s*\d+\.\s+(.*)$/);
+    const fence = line.match(/^```(\w*)$/);
     if (h) {
       flushPara();
       const level = h[1].length;
       const t = `heading_${level}`;
+      blocks.push({ object: 'block', type: t, [t]: { rich_text: [{ type: 'text', text: { content: h[2] } }] } });
+    } else if (bullet) {
+      flushPara();
       blocks.push({
-        object: 'block',
-        type: t,
-        [t]: { rich_text: [{ type: 'text', text: { content: h[2] } }] },
+        object: 'block', type: 'bulleted_list_item',
+        bulleted_list_item: { rich_text: [{ type: 'text', text: { content: bullet[1] } }] },
+      });
+    } else if (numbered) {
+      flushPara();
+      blocks.push({
+        object: 'block', type: 'numbered_list_item',
+        numbered_list_item: { rich_text: [{ type: 'text', text: { content: numbered[1] } }] },
       });
     } else if (line.trim() === '') {
       flushPara();
@@ -85,17 +94,78 @@ function markdownToBlocks(md) {
   return blocks;
 }
 
+function richTextToString(arr) {
+  if (!Array.isArray(arr)) return '';
+  return arr.map(rt => rt.plain_text || (rt.text && rt.text.content) || '').join('');
+}
+
+function blockToMarkdown(b) {
+  const t = b.type;
+  const o = b[t] || {};
+  const txt = () => richTextToString(o.rich_text || o.title || []);
+  switch (t) {
+    case 'paragraph':         return txt();
+    case 'heading_1':         return `# ${txt()}`;
+    case 'heading_2':         return `## ${txt()}`;
+    case 'heading_3':         return `### ${txt()}`;
+    case 'bulleted_list_item':return `- ${txt()}`;
+    case 'numbered_list_item':return `1. ${txt()}`;
+    case 'to_do':             return `- [${o.checked ? 'x' : ' '}] ${txt()}`;
+    case 'quote':             return `> ${txt()}`;
+    case 'code':              return '```' + (o.language || '') + '\n' + txt() + '\n```';
+    case 'divider':           return '---';
+    case 'callout':           return `> ${txt()}`;
+    case 'toggle':            return `<details><summary>${txt()}</summary></details>`;
+    case 'child_page':        return `[${o.title || 'Untitled'}]`;
+    case 'image':             return `![](${o.external ? o.external.url : (o.file ? o.file.url : '')})`;
+    case 'bookmark':          return `[bookmark](${o.url || ''})`;
+    case 'equation':          return `$$${o.expression || ''}$$`;
+    case 'unsupported':       return '<!-- unsupported block -->';
+    default:                  return `<!-- ${t} -->`;
+  }
+}
+
+async function renderMarkdown(pageId, env) {
+  let pageTitle = '';
+  try {
+    const page = await publicRequest({ method: 'GET', endpoint: `v1/pages/${pageId}`, envName: env });
+    const titleProp = page.properties && (page.properties.title || page.properties.Name || page.properties.name);
+    if (titleProp && titleProp.title) pageTitle = richTextToString(titleProp.title);
+  } catch (_) {}
+  const out = [];
+  if (pageTitle) out.push(`# ${pageTitle}`, '');
+  let cursor;
+  let unknown = [];
+  do {
+    const q = { page_size: 100 };
+    if (cursor) q.start_cursor = cursor;
+    const res = await publicRequest({ method: 'GET', endpoint: `v1/blocks/${pageId}/children`, envName: env, query: q });
+    for (const b of (res.results || [])) {
+      const md = blockToMarkdown(b);
+      out.push(md);
+      if (b.type === 'unsupported' || md.startsWith('<!-- ')) unknown.push(b.id);
+    }
+    cursor = res.has_more ? res.next_cursor : null;
+  } while (cursor);
+  process.stdout.write(out.join('\n') + '\n');
+  if (unknown.length) {
+    process.stderr.write(`note: ${unknown.length} block(s) could not be rendered. Use --json to inspect unknown_block_ids.\n`);
+  }
+}
+
 async function runPages(action, id, opts) {
   const env = C.getEnv(opts.env);
   if (action === 'get') {
     if (!id) die('Missing <page-id>.');
-    try {
-      const res = await publicRequest({ method: 'GET', endpoint: `v1/pages/${id}`, envName: env });
-      if (opts.json) return printJson(res);
-      // Try to also fetch children as a 'markdown-ish' rendering.
-      const children = await publicRequest({ method: 'GET', endpoint: `v1/blocks/${id}/children`, envName: env, query: { page_size: 100 } });
-      printJson({ page: res, children: children.results });
-    } catch (e) { die(e.message); }
+    if (opts.json) {
+      try {
+        const res = await publicRequest({ method: 'GET', endpoint: `v1/pages/${id}`, envName: env });
+        printJson(res);
+      } catch (e) { die(e.message); }
+    } else {
+      try { await renderMarkdown(id, env); }
+      catch (e) { die(e.message); }
+    }
   } else if (action === 'create') {
     const parent = parseParent(opts.parent);
     if (!parent) die("Missing --parent (e.g. 'page:<uuid>' or 'data-source:<uuid>').");
@@ -106,18 +176,10 @@ async function runPages(action, id, opts) {
       else if (!process.stdin.isTTY) content = '';
       else content = editorPrompt();
     }
-    const body = { parent, properties: {} };
-    if (parent.page_id || parent.workspace) {
-      // Page parent: title at root (private title default if not provided)
-      body.properties = {
-        title: { title: [{ type: 'text', text: { content: opts.title || 'Untitled' } }] },
-      };
-    } else {
-      // Database/data-source parent: title goes in 'title' property (best effort)
-      body.properties = {
-        title: { title: [{ type: 'text', text: { content: opts.title || 'Untitled' } }] },
-      };
-    }
+    const body = {
+      parent,
+      properties: { title: { title: [{ type: 'text', text: { content: opts.title || 'Untitled' } }] } },
+    };
     if (content) body.children = markdownToBlocks(content);
     try {
       const res = await publicRequest({ method: 'POST', endpoint: 'v1/pages', body, envName: env });
@@ -129,11 +191,15 @@ async function runPages(action, id, opts) {
     if (opts.archived !== undefined) patch.archived = !!opts.archived;
     if (opts.title) patch.properties = { title: { title: [{ type: 'text', text: { content: opts.title } }] } };
     try {
-      const res = await publicRequest({ method: 'PATCH', endpoint: `v1/pages/${id}`, body: patch, envName: env });
+      let res;
+      if (Object.keys(patch).length) {
+        res = await publicRequest({ method: 'PATCH', endpoint: `v1/pages/${id}`, body: patch, envName: env });
+      } else {
+        res = await publicRequest({ method: 'GET', endpoint: `v1/pages/${id}`, envName: env });
+      }
       if (opts.content !== undefined) {
         const children = markdownToBlocks(opts.content);
         if (opts.replaceContent) {
-          // Fetch & delete existing children
           const existing = await publicRequest({ method: 'GET', endpoint: `v1/blocks/${id}/children`, envName: env });
           for (const b of (existing.results || [])) {
             await publicRequest({ method: 'DELETE', endpoint: `v1/blocks/${b.id}`, envName: env });
